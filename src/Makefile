@@ -1,6 +1,8 @@
 CXXFLAGS += -std=c++11 -Wall -O2
 all: chic_com
 
-chic_com: test.o chic_comm.o jsonxx.o
-	$(CXX) -o $@ $^ -lcurl
+libhttp_msg.a: chic_comm.o jsonxx.o
+	ar -rcs $@ $^
+chic_com: test.o libhttp_msg.a
+	$(CXX) -o $@ $< -L. -lhttp_msg -lcurl
 
