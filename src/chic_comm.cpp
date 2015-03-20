@@ -54,11 +54,14 @@ string Channel::name() const
 
 struct chic::CommImpl {
     private:
-        map<string, shared_ptr<ChannelImpl> > channels;
+        const std::string mq_host_;
+        int mq_port_;
 		CURL* curl;
+        map<string, shared_ptr<ChannelImpl> > channels;
 
     public:
-		CommImpl():curl(0) { curl = curl_easy_init(); }
+		CommImpl():mq_host_(MQ_HOST), mq_port_(MQ_PORT), curl(0) { curl = curl_easy_init(); }
+		CommImpl(const std::string& h, int p):mq_host_(h), mq_port_(p), curl(0) { curl = curl_easy_init(); }
 		~CommImpl() { curl_easy_cleanup(curl); }
         void add_inchan(const string& name, const string& gname) {
             shared_ptr<ChannelImpl> p(new ChannelImpl(this, name, gname, true));
@@ -113,7 +116,7 @@ void CommImpl::put(ChannelImpl* chan,
 	char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
 	sprintf(uri,
 			"http://%s:%d/q/%s/messages?routingKey=%s",
-			MQ_HOST, MQ_PORT, q_esc, c_esc);
+			this->mq_host_.c_str(), this->mq_port_, q_esc, c_esc);
 	curl_free(q_esc);
 	curl_free(c_esc);
 	// printf("posting to %s\n", uri);
@@ -153,7 +156,7 @@ bool CommImpl::get(ChannelImpl* chan, const char* queue, int millis, Message& ms
 	char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
 	sprintf(uri,
 			"http://%s:%d/q/%s/messages?single=true&fromId=%d&routingKey=%s&timeoutMs=%d",
-			MQ_HOST, MQ_PORT,
+			this->mq_host_.c_str(), this->mq_port_,
 			q_esc, fromId, c_esc, millis);
 	curl_free(q_esc);
 	curl_free(c_esc);
@@ -231,6 +234,9 @@ OutChannel Comm::get_output_channel(const string& name) const
 }
 
 Comm::Comm(): impl_(new CommImpl)
+{
+}
+Comm::Comm(const std::string& h, int p): impl_(new CommImpl(h,p))
 {
 }
 

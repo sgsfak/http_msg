@@ -99,6 +99,7 @@ namespace chic {
         public:
             static int init(); // This should be always called during startup
             Comm();
+            Comm(const std::string& mq_host, int mq_port=9554);
             ~Comm();
 
             // ------ Registration of channels
