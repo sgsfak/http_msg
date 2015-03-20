@@ -88,8 +88,7 @@ int main(int argc, const char* argv[])
     const char* sender = argv[1];
     const char* room = argv[2];
 
-    std::atomic<bool> quited;
-    std::atomic_init(&quited, false);
+    std::atomic<bool> quited(false);
     thread t(print_incoming, sender, room, std::ref(quited));
 
     Comm com;
