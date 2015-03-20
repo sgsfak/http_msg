@@ -8,9 +8,9 @@ using namespace chic;
 
 int main(int argc, const char* argv[]) 
 {
-    Comm com;
-    com.init(argc, argv);
+    Comm::init();
 
+    Comm com;
 	bool do_input = true;
 	if (argc >= 3) {
 	   if (strcmp("-in", argv[1]) == 0)

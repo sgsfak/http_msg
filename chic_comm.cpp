@@ -128,7 +128,6 @@ void CommImpl::put(ChannelImpl* chan,
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, nbytes);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CommImpl::read_body);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &b);
-	//curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CommImpl::read_headers);
 
 	auto ok = curl_easy_perform(curl);
 	curl_slist_free_all(list);
@@ -185,11 +184,9 @@ bool CommImpl::get(ChannelImpl* chan, const char* queue, int millis, Message& ms
 
 	return true;
 }
-int Comm::init(int& argc, const char* argv[])
+int Comm::init()
 {
-	
-	curl_global_init(CURL_GLOBAL_ALL);
-    return argc;
+	return curl_global_init(CURL_GLOBAL_ALL);
 }
 
 void Comm::register_input_channel(const string& name, const string& gname)
