@@ -26,22 +26,22 @@ void compute_press_map(const string& filename, int tumor_radius)
 using namespace chic;
 int main(int argc, char* argv[])
 {
+    if (argc < 3) {
+        printf("Usage: bm <in-channel> <out-channel>");
+        return 1;
+    }
 
     Comm::init();
-
 
     Comm com;
 
     com.register_input_channel("in", argv[1]);
     com.register_output_channel("out", argv[2]);
-    
-
-    InChannel in = com.get_input_channel("in");
-    OutChannel out = com.get_output_channel("out");
 
     while (true) {
+        InChannel in = com.get_input_channel("in");
         Message m = in.get();
-        string msg(m.payload().data());
+        string msg(m.payload().data(), m.payload().size());
 
         printf("Got message with id=%d and body=%s\n", m.id(), msg.c_str());
 
@@ -52,8 +52,9 @@ int main(int argc, char* argv[])
 
         char filename[L_tmpnam];
         tmpnam (filename);
-        printf("Savinf presure map in file %s\n", filename);
-        compute_press_map(filename, 10);
+        printf("Saving presure map in file %s\n", filename);
+        compute_press_map(filename, radius);
+        OutChannel out = com.get_output_channel("out");
         out.put(filename);
     }
 
