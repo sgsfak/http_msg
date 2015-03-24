@@ -22,4 +22,27 @@ dispatching the messages.
 
 ### Examples ###
 
-For an example check `chat.cpp` in the `examples` folder.
+There are some examples in the `examples` folder...
+
+#### Example: two "hypomodels" interacting in a master-worker fashion
+
+Check the `oncosim.cpp` (producing the `os` executable) and the
+`biomechanics.cpp` (producing the `bm` executable). The `os` is a complex
+"model" that has some initial state, working in a time-driven loop (per hour
+iteration), that needs to communicate with the `bm` model. The `bm` model is
+the "worker" waiting for some request, computing some results that are sent
+back to "master" i.e. the `os`. The communication is implemented using the
+library with the `qdb` message broker behind the scenes. A typical execution
+script is the following:
+
+* Start the `qdb` message broker and create a `foo` queue :
+
+     curl http://127.0.0.1:9554/q/foo -d maxSize=10g
+
+* Start the "master" providing the tumor radius, the simulation time in hours, the input and the output channel:
+
+    ./os 100 96 bm-to-os os-to-bm
+
+* Start the "worker" providing the input and the output channel in the reverse order so that the input of `os` is the output of `bm` and vice versa:
+
+    ./bm os-to-bm bm-to-os
