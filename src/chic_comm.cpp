@@ -13,15 +13,15 @@
 using namespace std;
 
 struct chic::ChannelImpl {
-	chic::CommImpl* comm;
+    chic::CommImpl* comm;
     string local_name;
-	string global_name;
-	bool is_input;
-	int lastMessageIdRecv;
+    string global_name;
+    bool is_input;
+    int lastMessageIdRecv;
 
-	ChannelImpl(chic::CommImpl* c,
-			const string& ln, const string& gn, bool is_in):
-		comm(c), local_name(ln), global_name(gn), is_input(is_in), lastMessageIdRecv(0) {}
+    ChannelImpl(chic::CommImpl* c,
+            const string& ln, const string& gn, bool is_in):
+        comm(c), local_name(ln), global_name(gn), is_input(is_in), lastMessageIdRecv(0) {}
 };
 
 #define MQ_HOST "127.0.0.1"
@@ -29,23 +29,37 @@ struct chic::ChannelImpl {
 
 namespace chic_util {
 
-	int netstring_to_str(const unsigned char* bytes, int len,
-			string& out_s) {
+    int netstring_to_str(const unsigned char* bytes, int len,
+            string& out_s) {
 
-		string s(reinterpret_cast<char const*>(bytes), len);
-		int i = s.find(':'); // a netstring, preceded by length
-		int sz = std::stoi(s.substr(0, i));
-		string rest= s.substr(i+1, sz);
-		out_s.swap(rest);
-		return sz;
-	}
+        string s(reinterpret_cast<char const*>(bytes), len);
+        int i = s.find(':'); // a netstring, preceded by length
+        int sz = std::stoi(s.substr(0, i));
+        string rest= s.substr(i+1, sz);
+        out_s.swap(rest);
+        return sz;
+    }
 
+
+    class scoped_curl {
+
+        private:
+            CURL* curl;
+
+        public:
+            scoped_curl(): curl(NULL) { curl = curl_easy_init(); }
+            ~scoped_curl() { if (curl) curl_easy_cleanup(curl);}
+
+            CURL* get() { return curl; }
+
+        private:
+            scoped_curl(const scoped_curl&);
+            void operator=(const scoped_curl&);
+    };
 
 }
 
 using namespace chic;
-
-
 
 string Channel::name() const 
 {
@@ -56,13 +70,11 @@ struct chic::CommImpl {
     private:
         const std::string mq_host_;
         int mq_port_;
-		CURL* curl;
         map<string, shared_ptr<ChannelImpl> > channels;
 
     public:
-		CommImpl():mq_host_(MQ_HOST), mq_port_(MQ_PORT), curl(0) { curl = curl_easy_init(); }
-		CommImpl(const std::string& h, int p):mq_host_(h), mq_port_(p), curl(0) { curl = curl_easy_init(); }
-		~CommImpl() { curl_easy_cleanup(curl); }
+        CommImpl():mq_host_(MQ_HOST), mq_port_(MQ_PORT) {}
+        CommImpl(const std::string& h, int p):mq_host_(h), mq_port_(p){}
         void add_inchan(const string& name, const string& gname) {
             shared_ptr<ChannelImpl> p(new ChannelImpl(this, name, gname, true));
             this->channels.insert(make_pair(name, p));
@@ -77,119 +89,124 @@ struct chic::CommImpl {
             auto it = channels.find(name);
             if (it == channels.end())
                 throw not_found(name);
-			Channel ch(it->second.get());
-			return ch;
+            Channel ch(it->second.get());
+            return ch;
         }
-		void put(ChannelImpl* chan, 
-				const char* queue, const char* data, int nbytes);
-		bool get(ChannelImpl* chan, const char* queue, int millis, Message&);
+        void put(ChannelImpl* chan, 
+                const char* queue, const char* data, int nbytes);
+        bool get(ChannelImpl* chan, const char* queue, int millis, Message&);
 
 
-		static size_t read_headers(void *ptr, size_t size, size_t n, void *arg)
-		{
-			map<string, string>& m = *static_cast<map<string, string>*>(arg);
-			size_t c = n * size;
-			string s(reinterpret_cast<char*>(ptr), c);
-			auto i = s.find_first_of(':');
-			if (i != string::npos) {
-				auto k = s.substr(0, i);
-				auto v = s.substr(i+1, c-1);
-				m.insert(make_pair(k,v));
-			}
+        static size_t read_headers(void *ptr, size_t size, size_t n, void *arg)
+        {
+            map<string, string>& m = *static_cast<map<string, string>*>(arg);
+            size_t c = n * size;
+            string s(reinterpret_cast<char*>(ptr), c);
+            auto i = s.find_first_of(':');
+            if (i != string::npos) {
+                auto k = s.substr(0, i);
+                auto v = s.substr(i+1, c-1);
+                m.insert(make_pair(k,v));
+            }
 
-			return c;
+            return c;
 
-		}
-		static size_t read_body(void *ptr, size_t size, size_t n, void *arg)
-		{
-			buffer* b = static_cast<buffer*>(arg);
-			b->append(ptr, size*n);
-			return size*n;
-		}
+        }
+        static size_t read_body(void *ptr, size_t size, size_t n, void *arg)
+        {
+            buffer* b = static_cast<buffer*>(arg);
+            b->append(ptr, size*n);
+            return size*n;
+        }
 
 };
 void CommImpl::put(ChannelImpl* chan,
-		const char* queue, const char* data, int nbytes)
+        const char* queue, const char* data, int nbytes)
 {
-	char uri[1024];
-	char* q_esc = curl_easy_escape(curl, queue, strlen(queue));
-	char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
-	sprintf(uri,
-			"http://%s:%d/q/%s/messages?routingKey=%s",
-			this->mq_host_.c_str(), this->mq_port_, q_esc, c_esc);
-	curl_free(q_esc);
-	curl_free(c_esc);
-	// printf("posting to %s\n", uri);
-	buffer b;
-	curl_easy_setopt(curl, CURLOPT_URL, uri);
-	curl_easy_setopt(curl, CURLOPT_POST, 1L);
-	struct curl_slist *list = NULL;
-	list = curl_slist_append(list, "Expect:");
-	list = curl_slist_append(list, "Content-type:application/octet-stream");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, nbytes);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CommImpl::read_body);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &b);
+    chic_util::scoped_curl c;
+    CURL* curl = c.get();
+    char uri[1024];
+    char* q_esc = curl_easy_escape(curl, queue, strlen(queue));
+    char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
+    sprintf(uri,
+            "http://%s:%d/q/%s/messages?routingKey=%s",
+            this->mq_host_.c_str(), this->mq_port_, q_esc, c_esc);
+    curl_free(q_esc);
+    curl_free(c_esc);
+    // printf("posting to %s\n", uri);
+    map<string, string> headers;
+    buffer b;
+    curl_easy_setopt(curl, CURLOPT_URL, uri);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    struct curl_slist *list = NULL;
+    list = curl_slist_append(list, "Expect:");
+    list = curl_slist_append(list, "Content-type:application/octet-stream");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, nbytes);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CommImpl::read_body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &b);
 
-	auto ok = curl_easy_perform(curl);
-	curl_slist_free_all(list);
-	if(ok != CURLE_OK)
-		throw chic::CommException(curl_easy_strerror(ok));
-	long http_code;
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-	if (http_code / 100 != 2)
-		throw chic::CommException("No success HTTP code!");
+    auto ok = curl_easy_perform(curl);
+    curl_slist_free_all(list);
+    if(ok != CURLE_OK)
+        throw chic::CommException(curl_easy_strerror(ok));
+    long http_code;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    if (http_code / 100 != 2)
+        throw chic::CommException("No success HTTP code!");
 
-	string s(b.data(), b.size());
-	jsonxx::Object res;
-	res.parse(s);
-	printf("Message sent with id=%d\n", 
-			static_cast<int>(res.get<jsonxx::Number>("id")));
+    string s(b.data(), b.size());
+    jsonxx::Object res;
+    res.parse(s);
+    printf("Message sent with id=%d\n", 
+            static_cast<int>(res.get<jsonxx::Number>("id")));
 
 }
 bool CommImpl::get(ChannelImpl* chan, const char* queue, int millis, Message& msg)
 {
-	int fromId = chan->lastMessageIdRecv + 1;
-	char uri[1024];
-	char* q_esc = curl_easy_escape(curl, queue, strlen(queue));
-	char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
-	sprintf(uri,
-			"http://%s:%d/q/%s/messages?single=true&fromId=%d&routingKey=%s&timeoutMs=%d",
-			this->mq_host_.c_str(), this->mq_port_,
-			q_esc, fromId, c_esc, millis);
-	curl_free(q_esc);
-	curl_free(c_esc);
-	// printf("Getting from %s\n", uri);
-	buffer b;
-	map<string, string> headers;
-	curl_easy_setopt(curl, CURLOPT_URL, uri);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CommImpl::read_body);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &b);
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CommImpl::read_headers);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &headers);
+    chic_util::scoped_curl c;
+    CURL* curl = c.get();
+    int fromId = chan->lastMessageIdRecv + 1;
+    char uri[1024];
+    char* q_esc = curl_easy_escape(curl, queue, strlen(queue));
+    char* c_esc = curl_easy_escape(curl, chan->global_name.c_str(), chan->global_name.size());
+    sprintf(uri,
+            "http://%s:%d/q/%s/messages?single=true&fromId=%d&routingKey=%s&timeoutMs=%d",
+            this->mq_host_.c_str(), this->mq_port_,
+            q_esc, fromId, c_esc, millis);
+    curl_free(q_esc);
+    curl_free(c_esc);
+    // printf("Getting from %s\n", uri);
+    buffer b;
+    map<string, string> headers;
+    curl_easy_setopt(curl, CURLOPT_URL, uri);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CommImpl::read_body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CommImpl::read_headers);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &headers);
 
-	auto ok = curl_easy_perform(curl);
-	if(ok != CURLE_OK)
-		throw chic::CommException(curl_easy_strerror(ok));
-	long http_code;
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-	if (http_code / 100 != 2)
-		throw chic::CommException("No success HTTP code!");
+    auto ok = curl_easy_perform(curl);
+    if(ok != CURLE_OK)
+        throw chic::CommException(curl_easy_strerror(ok));
+    long http_code;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    if (http_code / 100 != 2)
+        throw chic::CommException("No success HTTP code!");
 
-	auto idx =  headers.find("QDB-Id");
-	if (idx == headers.end()) 
-		return false;
-	msg.setId( std::stoi( idx->second ) );
-	msg.payload().swap(b);
-	chan->lastMessageIdRecv = msg.id();
-	// printf("got msg with id= %d\n", msg.id());
+    auto idx =  headers.find("QDB-Id");
+    if (idx == headers.end()) 
+        return false;
+    msg.setId( std::stoi( idx->second ) );
+    msg.payload().swap(b);
+    chan->lastMessageIdRecv = msg.id();
+    // printf("got msg with id= %d\n", msg.id());
 
-	return true;
+    return true;
 }
 int Comm::init()
 {
-	return curl_global_init(CURL_GLOBAL_ALL);
+    return curl_global_init(CURL_GLOBAL_ALL);
 }
 
 void Comm::register_input_channel(const string& name, const string& gname)
@@ -203,34 +220,34 @@ void Comm::register_output_channel(const string& name, const string& gname)
 
 void OutChannel::put(const char* payload, int nbytes)
 {
-	assert(impl_);
-	impl_->comm->put(impl_, "foo", payload, nbytes);
+    assert(impl_);
+    impl_->comm->put(impl_, "foo", payload, nbytes);
 }
 
 bool InChannel::try_get(int millis, Message& msg)
 {
-   	bool ret = impl_->comm->get(impl_, "foo", millis, msg);
-	return ret;
+    bool ret = impl_->comm->get(impl_, "foo", millis, msg);
+    return ret;
 }
 Message InChannel::get()
 {
-	Message msg;
-   	impl_->comm->get(impl_, "foo", 0, msg);
-	return msg;
+    Message msg;
+    impl_->comm->get(impl_, "foo", 0, msg);
+    return msg;
 }
 InChannel Comm::get_input_channel(const string& name) const
 {
     auto ch = this->impl_->get_channel(name);
-	if (!ch.isInput())
-		throw not_found(name);
-	return ch.toInput();
+    if (!ch.isInput())
+        throw not_found(name);
+    return ch.toInput();
 }
 OutChannel Comm::get_output_channel(const string& name) const
 {
-	auto ch = this->impl_->get_channel(name);
-	if (ch.isInput())
-		throw not_found(name);
-	return ch.toOutput();
+    auto ch = this->impl_->get_channel(name);
+    if (ch.isInput())
+        throw not_found(name);
+    return ch.toOutput();
 }
 
 Comm::Comm(): impl_(new CommImpl)
@@ -243,21 +260,21 @@ Comm::Comm(const std::string& h, int p): impl_(new CommImpl(h,p))
 Comm::~Comm() = default;
 
 bool Channel::isInput() const {
-	assert(this->impl_);
-	return this->impl_->is_input;
+    assert(this->impl_);
+    return this->impl_->is_input;
 }
 
 InChannel Channel::toInput() {
-	assert(this->isInput());
-	InChannel ch;
-	ch.impl_ = this->impl_;
-	return ch;
+    assert(this->isInput());
+    InChannel ch;
+    ch.impl_ = this->impl_;
+    return ch;
 }
 OutChannel Channel::toOutput() {
-	assert(!this->isInput());
-	OutChannel ch;
-	ch.impl_ = this->impl_;
-	return ch;
+    assert(!this->isInput());
+    OutChannel ch;
+    ch.impl_ = this->impl_;
+    return ch;
 }
 
 
